@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <h2>Create Profile</h2>
+  <form method="post" action="/web/profiles">
+    <label>Name <input type="text" name="name" required /></label>
+    <label>Job Family <input type="text" name="job_family" required /></label>
+    <label>Summary <textarea name="summary" rows="3"></textarea></label>
+    <button type="submit">Create Profile</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Start Application Run</h2>
+  <form method="post" action="/web/runs">
+    <label>Job URL <input type="url" name="url" required /></label>
+    <label>Profile
+      <select name="profile_id" required>
+        {% for profile in profiles %}
+        <option value="{{ profile.id }}">#{{ profile.id }} {{ profile.name }} ({{ profile.job_family }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Mode
+      <select name="mode">
+        <option value="strict">strict</option>
+        <option value="medium" selected>medium</option>
+        <option value="yolo">yolo</option>
+      </select>
+    </label>
+    <label class="inline"><input type="checkbox" name="submit" value="true" /> Enable final submit</label>
+    <button type="submit">Start Run</button>
+  </form>
+</section>
+
+<section class="grid">
+  <article class="panel">
+    <h2>Profiles</h2>
+    <ul>
+      {% for profile in profiles %}
+      <li>#{{ profile.id }} - {{ profile.name }} ({{ profile.job_family }})</li>
+      {% else %}
+      <li>No profiles yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="panel">
+    <h2>Recent Jobs</h2>
+    <ul>
+      {% for job in jobs %}
+      <li>#{{ job.id }} - {{ job.title or "(untitled)" }} - {{ job.domain }}</li>
+      {% else %}
+      <li>No jobs yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="panel">
+    <h2>Recent Runs</h2>
+    <ul>
+      {% for run in runs %}
+      <li><a href="/runs/{{ run.id }}">Run #{{ run.id }}</a> - {{ run.status }} - {{ run.mode }}</li>
+      {% else %}
+      <li>No runs yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <h2>Run #{{ run.id }}</h2>
+  <p>Status: <strong>{{ run.status }}</strong></p>
+  <p>Mode: {{ run.mode }} | Stage: {{ run.current_stage }}</p>
+  <p>Job: {{ job.title or "(untitled)" }} - {{ job.url }}</p>
+  <p>Profile: #{{ profile.id }} {{ profile.name }}</p>
+</section>
+
+<section class="panel">
+  <h2>Pending Approvals</h2>
+  {% for item in pending %}
+  <div class="pending-item">
+    <p><strong>Event #{{ item.id }}</strong> - {{ item.stage }} / {{ item.action }}</p>
+    <pre>{{ item.payload_json }}</pre>
+    <div class="row">
+      <form method="post" action="/web/runs/{{ run.id }}/approve">
+        <input type="hidden" name="event_id" value="{{ item.id }}" />
+        <button type="submit">Approve</button>
+      </form>
+      <form method="post" action="/web/runs/{{ run.id }}/reject">
+        <input type="hidden" name="event_id" value="{{ item.id }}" />
+        <button class="danger" type="submit">Reject</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <p>No pending approvals.</p>
+  {% endfor %}
+</section>
+
+<section class="panel">
+  <h2>Events</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Stage</th>
+        <th>Action</th>
+        <th>Approval</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td>{{ event.id }}</td>
+        <td>{{ event.stage }}</td>
+        <td>{{ event.action }}</td>
+        <td>{{ event.approval_state }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
