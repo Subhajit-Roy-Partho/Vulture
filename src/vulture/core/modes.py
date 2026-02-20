@@ -19,6 +19,7 @@ class ModePolicy:
                 "job_parsing_start",
                 "cv_tailoring_output",
                 "db_patch_apply",
+                "question_review_required",
                 "start_browser_session",
                 "fill_required_section",
                 "file_upload",
@@ -29,6 +30,7 @@ class ModePolicy:
             return stage in {
                 "cv_tailoring_output",
                 "db_patch_apply",
+                "question_review_required",
                 "fill_required_section",
                 "file_upload",
                 "final_submit",

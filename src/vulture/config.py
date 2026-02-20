@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     browser_use_allowed_domains: str = ""
     browser_use_blocked_domains: str = ""
     browser_use_user_data_dir: Path = Path("./data/browser_profile")
+    browser_use_channel: str = ""
+    browser_use_executable_path: str = ""
+    browser_use_profile_directory: str = ""
 
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"

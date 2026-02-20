@@ -50,6 +50,17 @@ def detect_adapter(url: str) -> DomainAdapter:
             ),
         )
 
+    if "linkedin.com" in host:
+        return DomainAdapter(
+            name="linkedin",
+            instructions=(
+                "LinkedIn flows should prioritize Easy Apply modal detection. "
+                "If the posting routes to external apply instead of Easy Apply, stop and report it. "
+                "Complete one step at a time, validate required fields before moving forward, "
+                "and stop immediately if CAPTCHA or additional human verification appears."
+            ),
+        )
+
     return DomainAdapter(
         name="generic",
         instructions=(

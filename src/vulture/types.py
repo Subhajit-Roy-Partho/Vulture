@@ -103,7 +103,7 @@ class TailoredDocuments(BaseModel):
 
 
 class BrowserFillResult(BaseModel):
-    status: Literal["completed", "waiting_approval", "waiting_captcha", "failed"]
+    status: Literal["completed", "waiting_approval", "waiting_captcha", "failed", "blocked"]
     stage: str = ""
     action: str = ""
     message: str = ""

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <h2>Questionnaire Review - {{ profile.name }}</h2>
+  <p>Pending review items: {{ questionnaire_review|length }}</p>
+  <p><a href="/profiles/{{ profile.id }}">Back to profile workspace</a></p>
+</section>
+
+<section class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Section</th>
+        <th>Question</th>
+        <th>Answer</th>
+        <th>State</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in questionnaire_review %}
+      <tr>
+        <td>{{ row.section }}</td>
+        <td>{{ row.question }}</td>
+        <td>{{ row.answer or "(empty)" }}</td>
+        <td>{{ row.verification_state }}</td>
+        <td>
+          <div class="row">
+            <form method="post" action="/web/profiles/{{ profile.id }}/questionnaire/{{ row.question_hash }}/verify">
+              <button type="submit">Verify</button>
+            </form>
+            <form method="post" action="/web/profiles/{{ profile.id }}/questionnaire/{{ row.question_hash }}/reject">
+              <button class="danger" type="submit">Reject</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5">No items pending review.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

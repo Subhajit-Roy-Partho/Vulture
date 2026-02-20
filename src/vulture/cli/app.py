@@ -8,9 +8,11 @@ import uvicorn
 
 from vulture.api.app import create_app
 from vulture.config import get_settings
+from vulture.core.cv_parser import parse_cv_text
 from vulture.core.orchestrator import RunOrchestrator
+from vulture.core.question_templates import generate_question_templates
 from vulture.db.init import init_database
-from vulture.db.repositories import Repository
+from vulture.db.repositories import Repository, hash_question
 from vulture.db.session import SessionLocal
 from vulture.logging_config import configure_logging
 
@@ -98,6 +100,74 @@ def profile_import(file: Path = typer.Option(..., "--file", exists=True, readabl
             )
 
         typer.echo(json.dumps({"id": profile.id, "name": profile.name}, indent=2))
+
+
+@profile_app.command("import-cv")
+def profile_import_cv(
+    profile_id: int = typer.Option(..., "--profile-id"),
+    file: Path = typer.Option(..., "--file", exists=True, readable=True),
+    format: str = typer.Option("latex", "--format"),
+    scope: str = typer.Option("all", "--scope"),
+) -> None:
+    configure_logging()
+    ensure_initialized()
+    raw_text = file.read_text(encoding="utf-8")
+
+    with SessionLocal() as db:
+        repo = Repository(db)
+        if not repo.get_profile(profile_id):
+            raise typer.BadParameter(f"profile {profile_id} not found")
+
+        parsed = parse_cv_text(raw_text, input_format=format)
+        templates = generate_question_templates(parsed, scope=scope)
+        result = repo.import_cv_payload(
+            profile_id=profile_id,
+            parsed=parsed,
+            templates=templates,
+            input_format=format,
+            scope=scope,
+        )
+        typer.echo(json.dumps(result.model_dump(), indent=2))
+
+
+@profile_app.command("questionnaire")
+def profile_questionnaire(profile_id: int = typer.Option(..., "--profile-id")) -> None:
+    configure_logging()
+    ensure_initialized()
+    with SessionLocal() as db:
+        repo = Repository(db)
+        if not repo.get_profile(profile_id):
+            raise typer.BadParameter(f"profile {profile_id} not found")
+        data = repo.list_profile_questionnaire(profile_id)
+        typer.echo(json.dumps(data, indent=2))
+
+
+@profile_app.command("verify-answer")
+def profile_verify_answer(
+    profile_id: int = typer.Option(..., "--profile-id"),
+    question: str = typer.Option(..., "--question"),
+) -> None:
+    configure_logging()
+    ensure_initialized()
+    with SessionLocal() as db:
+        repo = Repository(db)
+        q_hash = hash_question(question)
+        repo.set_profile_answer_verification(profile_id, q_hash, "verified")
+        typer.echo(json.dumps({"profile_id": profile_id, "question_hash": q_hash, "state": "verified"}, indent=2))
+
+
+@profile_app.command("reject-answer")
+def profile_reject_answer(
+    profile_id: int = typer.Option(..., "--profile-id"),
+    question: str = typer.Option(..., "--question"),
+) -> None:
+    configure_logging()
+    ensure_initialized()
+    with SessionLocal() as db:
+        repo = Repository(db)
+        q_hash = hash_question(question)
+        repo.set_profile_answer_verification(profile_id, q_hash, "rejected")
+        typer.echo(json.dumps({"profile_id": profile_id, "question_hash": q_hash, "state": "rejected"}, indent=2))
 
 
 @profile_app.command("add-answer")

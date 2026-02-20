@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vulture.browser.domain_adapters import detect_adapter
 from vulture.browser.engine import BrowserAutomationEngine, BrowserContext
 from vulture.config import Settings, get_settings
 from vulture.core.events import EventBus
@@ -41,6 +42,7 @@ class RunOrchestrator:
         if profile is None:
             raise ValueError(f"profile {profile_id} does not exist")
 
+        adapter = detect_adapter(url)
         job = self.repo.create_job(url)
         run = self.repo.create_run(
             job_id=job.id,
@@ -52,6 +54,8 @@ class RunOrchestrator:
                 "submit": submit,
                 "browser_action_index": 0,
                 "patch_generated": False,
+                "question_review_checked": False,
+                "domain_adapter": adapter.name,
             },
         )
         self.repo.append_run_event(
@@ -292,14 +296,49 @@ class RunOrchestrator:
             return True
 
         if run.current_stage == "browser_flow":
-            actions = [
-                "start_session",
-                "fill_personal_info",
-                "fill_work_history",
-                "fill_compliance",
-                "upload_resume",
-                "submit_application",
-            ]
+            adapter_name = str(context.get("domain_adapter") or detect_adapter(job.url).name).lower()
+            context["domain_adapter"] = adapter_name
+
+            if not bool(context.get("question_review_checked", False)):
+                pending_all = self.repo.count_pending_review_answers(run.profile_id, critical_only=False)
+                pending_critical = self.repo.count_pending_review_answers(
+                    run.profile_id, critical_only=True
+                )
+                context["pending_unverified_answers"] = pending_all
+                context["pending_unverified_critical_answers"] = pending_critical
+
+                if not bool(context.get("question_review_summary_logged", False)):
+                    self.repo.append_run_event(
+                        run_id=run.id,
+                        stage="question_review_required",
+                        action="summary",
+                        payload_json={
+                            "pending_unverified_answers": pending_all,
+                            "pending_unverified_critical_answers": pending_critical,
+                        },
+                    )
+                    context["question_review_summary_logged"] = True
+                    self._emit_db_events(run.id)
+
+                self.repo.update_run(run.id, context_json=context)
+
+                if run.mode in {"strict", "medium"} and pending_critical > 0:
+                    if not self._approval_gate(
+                        run_id=run.id,
+                        policy=policy,
+                        stage="question_review_required",
+                        action="approve_unverified_critical_answers",
+                        payload={
+                            "pending_unverified_critical_answers": pending_critical,
+                            "note": "Review/confirm critical imported answers before browser actions",
+                        },
+                    ):
+                        return False
+
+                context["question_review_checked"] = True
+                self.repo.update_run(run.id, context_json=context)
+
+            actions = self._browser_actions_for_adapter(adapter_name)
             idx = int(context.get("browser_action_index", 0))
 
             while idx < len(actions):
@@ -321,6 +360,8 @@ class RunOrchestrator:
                         profile_id=profile.id,
                         submit=bool(context.get("submit", False)),
                         captcha_solved=bool(context.get("captcha_solved", False)),
+                        adapter_name=adapter_name,
+                        tailored_resume_path=context.get("tailored_resume_path"),
                     ),
                     action,
                 )
@@ -335,6 +376,24 @@ class RunOrchestrator:
                         approval_state="pending",
                     )
                     self.repo.update_run(run.id, status="waiting_captcha", context_json=context)
+                    self._emit_db_events(run.id)
+                    return False
+
+                if result.status == "blocked":
+                    self.repo.append_run_event(
+                        run_id=run.id,
+                        stage=stage,
+                        action=f"blocked:{action}",
+                        payload_json={"message": result.message},
+                    )
+                    self.repo.update_run(
+                        run.id,
+                        status="blocked",
+                        current_stage="blocked",
+                        error=result.message,
+                        completed=True,
+                        context_json=context,
+                    )
                     self._emit_db_events(run.id)
                     return False
 
@@ -535,15 +594,34 @@ class RunOrchestrator:
             loop.create_task(self.event_bus.publish(run_id, payload))
 
     def _stage_for_browser_action(self, action: str) -> str:
-        if action == "start_session":
+        if action in {"start_session", "linkedin_open_easy_apply"}:
             return "start_browser_session"
-        if action.startswith("fill_"):
+        if action.startswith("fill_") or action == "linkedin_fill_steps":
             return "fill_required_section"
         if action == "upload_resume":
             return "file_upload"
         if action == "submit_application":
             return "final_submit"
         return "browser"
+
+    @staticmethod
+    def _browser_actions_for_adapter(adapter_name: str) -> list[str]:
+        if adapter_name == "linkedin":
+            return [
+                "start_session",
+                "linkedin_open_easy_apply",
+                "linkedin_fill_steps",
+                "upload_resume",
+                "submit_application",
+            ]
+        return [
+            "start_session",
+            "fill_personal_info",
+            "fill_work_history",
+            "fill_compliance",
+            "upload_resume",
+            "submit_application",
+        ]
 
     def _write_tailored_docs(self, run_id: int, resume_md: str, cover_md: str) -> tuple[Path, Path]:
         ts = datetime.now(UTC).strftime("%Y%m%d%H%M%S")

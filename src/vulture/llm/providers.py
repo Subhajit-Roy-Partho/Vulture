@@ -31,6 +31,29 @@ class LLMProvider:
         )
 
     def complete_text(self, *, model: str, prompt: str) -> ModelResponse:
+        try:
+            return self._complete_via_responses(model=model, prompt=prompt)
+        except Exception as exc:
+            if not self._is_unsupported_responses_endpoint(exc):
+                raise
+
+            logger.warning(
+                "Responses API unavailable for provider=%s base_url=%s; "
+                "falling back to chat.completions (%s)",
+                self.config.name,
+                self.config.base_url,
+                exc,
+            )
+            try:
+                return self._complete_via_chat_completions(model=model, prompt=prompt)
+            except Exception:
+                raise
+
+    def complete_json(self, *, model: str, prompt: str) -> dict[str, Any]:
+        text_response = self.complete_text(model=model, prompt=prompt)
+        return parse_json(text_response.content)
+
+    def _complete_via_responses(self, *, model: str, prompt: str) -> ModelResponse:
         response = self.client.responses.create(
             model=model,
             input=[
@@ -42,11 +65,52 @@ class LLMProvider:
         )
         text = getattr(response, "output_text", "") or ""
         raw = response.model_dump() if hasattr(response, "model_dump") else {}
+        if not isinstance(raw, dict):
+            raw = {"raw": raw}
+        raw["api_path"] = "responses"
         return ModelResponse(content=text, raw=raw)
 
-    def complete_json(self, *, model: str, prompt: str) -> dict[str, Any]:
-        text_response = self.complete_text(model=model, prompt=prompt)
-        return parse_json(text_response.content)
+    def _complete_via_chat_completions(self, *, model: str, prompt: str) -> ModelResponse:
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        text = self._extract_chat_text(response)
+        raw = response.model_dump() if hasattr(response, "model_dump") else {}
+        if not isinstance(raw, dict):
+            raw = {"raw": raw}
+        raw["api_path"] = "chat_completions"
+        return ModelResponse(content=text, raw=raw)
+
+    @staticmethod
+    def _extract_chat_text(response: Any) -> str:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return ""
+
+        message = getattr(choices[0], "message", None)
+        if message is None:
+            return ""
+
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        return str(content)
+
+    @staticmethod
+    def _is_unsupported_responses_endpoint(exc: Exception) -> bool:
+        status_code = getattr(exc, "status_code", None)
+        if status_code == 404:
+            return True
+
+        message = str(exc).strip().lower()
+        if not message:
+            return False
+
+        return "not found" in message or "404" in message
 
 
 def parse_json(content: str) -> dict[str, Any]:

@@ -39,7 +39,7 @@
     <h2>Profiles</h2>
     <ul>
       {% for profile in profiles %}
-      <li>#{{ profile.id }} - {{ profile.name }} ({{ profile.job_family }})</li>
+      <li><a href="/profiles/{{ profile.id }}">#{{ profile.id }} - {{ profile.name }} ({{ profile.job_family }})</a></li>
       {% else %}
       <li>No profiles yet.</li>
       {% endfor %}

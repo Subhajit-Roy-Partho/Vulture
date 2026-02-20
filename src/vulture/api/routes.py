@@ -5,18 +5,42 @@ from sqlalchemy.orm import Session
 
 from vulture.api.deps import get_db
 from vulture.api.schemas import (
+    AdditionalProjectRequest,
+    AdditionalProjectResponse,
+    AwardRequest,
+    AwardResponse,
+    CVImportAPIRequest,
+    CVImportAPIResponse,
+    ConferenceRequest,
+    ConferenceResponse,
+    EducationRequest,
+    EducationResponse,
+    ExperienceRequest,
+    ExperienceResponse,
     JobIntakeRequest,
     JobIntakeResponse,
     ProfileAnswerRequest,
     ProfileCreateRequest,
     ProfileResponse,
+    PublicationRequest,
+    PublicationResponse,
+    QuestionnaireDecisionResponse,
+    QuestionnaireItemResponse,
     RunCreateRequest,
     RunDecisionRequest,
     RunEventResponse,
     RunResponse,
+    ServiceRequest,
+    ServiceResponse,
+    SkillRequest,
+    SkillResponse,
+    TeachingRequest,
+    TeachingResponse,
 )
+from vulture.core.cv_parser import parse_cv_text
 from vulture.core.job_fetcher import fetch_job_text
 from vulture.core.orchestrator import RunOrchestrator
+from vulture.core.question_templates import generate_question_templates
 from vulture.core.runtime import get_event_bus
 from vulture.db.repositories import Repository
 from vulture.llm.router import LLMRouter
@@ -70,6 +94,334 @@ def add_profile_answer(
         question_type=payload.question_type,
     )
     return {"id": answer.id, "question_hash": answer.question_hash}
+
+
+@router.post("/profiles/{profile_id}/cv/import", response_model=CVImportAPIResponse)
+def import_cv(
+    profile_id: int,
+    payload: CVImportAPIRequest,
+    db: Session = Depends(get_db),
+) -> CVImportAPIResponse:
+    repo = Repository(db)
+    if not repo.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    parsed = parse_cv_text(payload.raw_text, input_format=payload.format)
+    templates = generate_question_templates(parsed, scope=payload.scope)
+    if not payload.create_questions:
+        templates = []
+
+    result = repo.import_cv_payload(
+        profile_id=profile_id,
+        parsed=parsed,
+        templates=templates,
+        input_format=payload.format,
+        scope=payload.scope,
+    )
+    return CVImportAPIResponse.model_validate(result.model_dump())
+
+
+@router.get("/profiles/{profile_id}/questionnaire", response_model=list[QuestionnaireItemResponse])
+def profile_questionnaire(profile_id: int, db: Session = Depends(get_db)) -> list[QuestionnaireItemResponse]:
+    repo = Repository(db)
+    if not repo.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return [QuestionnaireItemResponse.model_validate(item) for item in repo.list_profile_questionnaire(profile_id)]
+
+
+@router.get(
+    "/profiles/{profile_id}/questionnaire/review",
+    response_model=list[QuestionnaireItemResponse],
+)
+def profile_questionnaire_review(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> list[QuestionnaireItemResponse]:
+    repo = Repository(db)
+    if not repo.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return [
+        QuestionnaireItemResponse.model_validate(item)
+        for item in repo.list_profile_questionnaire_review(profile_id)
+    ]
+
+
+@router.post(
+    "/profiles/{profile_id}/questionnaire/{question_hash}/verify",
+    response_model=QuestionnaireDecisionResponse,
+)
+def verify_question_answer(
+    profile_id: int,
+    question_hash: str,
+    db: Session = Depends(get_db),
+) -> QuestionnaireDecisionResponse:
+    repo = Repository(db)
+    try:
+        repo.set_profile_answer_verification(profile_id, question_hash, "verified")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return QuestionnaireDecisionResponse(
+        profile_id=profile_id,
+        question_hash=question_hash,
+        verification_state="verified",
+    )
+
+
+@router.post(
+    "/profiles/{profile_id}/questionnaire/{question_hash}/reject",
+    response_model=QuestionnaireDecisionResponse,
+)
+def reject_question_answer(
+    profile_id: int,
+    question_hash: str,
+    db: Session = Depends(get_db),
+) -> QuestionnaireDecisionResponse:
+    repo = Repository(db)
+    try:
+        repo.set_profile_answer_verification(profile_id, question_hash, "rejected")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return QuestionnaireDecisionResponse(
+        profile_id=profile_id,
+        question_hash=question_hash,
+        verification_state="rejected",
+    )
+
+
+@router.get("/profiles/{profile_id}/publications", response_model=list[PublicationResponse])
+def list_publications(profile_id: int, db: Session = Depends(get_db)) -> list[PublicationResponse]:
+    repo = Repository(db)
+    rows = repo.list_publications(profile_id)
+    return [
+        PublicationResponse(
+            id=row.id,
+            title=row.title,
+            venue=row.venue,
+            publication_year=row.publication_year,
+            status=row.status,
+            doi=row.doi,
+            url=row.url,
+            authors_json=row.authors_json,
+            contribution=row.contribution,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/profiles/{profile_id}/publications", response_model=PublicationResponse)
+def create_publication(
+    profile_id: int,
+    payload: PublicationRequest,
+    db: Session = Depends(get_db),
+) -> PublicationResponse:
+    repo = Repository(db)
+    row = repo.add_publication(profile_id=profile_id, **payload.model_dump())
+    return PublicationResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/awards", response_model=list[AwardResponse])
+def list_awards(profile_id: int, db: Session = Depends(get_db)) -> list[AwardResponse]:
+    repo = Repository(db)
+    rows = repo.list_awards(profile_id)
+    return [AwardResponse(id=row.id, title=row.title, issuer=row.issuer, award_year=row.award_year, details=row.details) for row in rows]
+
+
+@router.post("/profiles/{profile_id}/awards", response_model=AwardResponse)
+def create_award(
+    profile_id: int,
+    payload: AwardRequest,
+    db: Session = Depends(get_db),
+) -> AwardResponse:
+    repo = Repository(db)
+    row = repo.add_award(profile_id=profile_id, **payload.model_dump())
+    return AwardResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/conferences", response_model=list[ConferenceResponse])
+def list_conferences(profile_id: int, db: Session = Depends(get_db)) -> list[ConferenceResponse]:
+    repo = Repository(db)
+    rows = repo.list_conferences(profile_id)
+    return [ConferenceResponse(id=row.id, name=row.name, event_year=row.event_year, role=row.role, details=row.details) for row in rows]
+
+
+@router.post("/profiles/{profile_id}/conferences", response_model=ConferenceResponse)
+def create_conference(
+    profile_id: int,
+    payload: ConferenceRequest,
+    db: Session = Depends(get_db),
+) -> ConferenceResponse:
+    repo = Repository(db)
+    row = repo.add_conference(profile_id=profile_id, **payload.model_dump())
+    return ConferenceResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/teaching", response_model=list[TeachingResponse])
+def list_teaching(profile_id: int, db: Session = Depends(get_db)) -> list[TeachingResponse]:
+    repo = Repository(db)
+    rows = repo.list_teaching(profile_id)
+    return [TeachingResponse(id=row.id, role=row.role, organization=row.organization, term=row.term, details=row.details) for row in rows]
+
+
+@router.post("/profiles/{profile_id}/teaching", response_model=TeachingResponse)
+def create_teaching(
+    profile_id: int,
+    payload: TeachingRequest,
+    db: Session = Depends(get_db),
+) -> TeachingResponse:
+    repo = Repository(db)
+    row = repo.add_teaching(profile_id=profile_id, **payload.model_dump())
+    return TeachingResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/service", response_model=list[ServiceResponse])
+def list_service(profile_id: int, db: Session = Depends(get_db)) -> list[ServiceResponse]:
+    repo = Repository(db)
+    rows = repo.list_service(profile_id)
+    return [
+        ServiceResponse(
+            id=row.id,
+            role=row.role,
+            organization=row.organization,
+            event_name=row.event_name,
+            event_year=row.event_year,
+            details=row.details,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/profiles/{profile_id}/service", response_model=ServiceResponse)
+def create_service(
+    profile_id: int,
+    payload: ServiceRequest,
+    db: Session = Depends(get_db),
+) -> ServiceResponse:
+    repo = Repository(db)
+    row = repo.add_service(profile_id=profile_id, **payload.model_dump())
+    return ServiceResponse(id=row.id, **payload.model_dump())
+
+
+@router.get(
+    "/profiles/{profile_id}/additional-projects",
+    response_model=list[AdditionalProjectResponse],
+)
+def list_additional_projects(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> list[AdditionalProjectResponse]:
+    repo = Repository(db)
+    rows = repo.list_additional_projects(profile_id)
+    return [
+        AdditionalProjectResponse(
+            id=row.id,
+            title=row.title,
+            summary=row.summary,
+            skills_json=row.skills_json,
+            impact=row.impact,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/profiles/{profile_id}/additional-projects",
+    response_model=AdditionalProjectResponse,
+)
+def create_additional_project(
+    profile_id: int,
+    payload: AdditionalProjectRequest,
+    db: Session = Depends(get_db),
+) -> AdditionalProjectResponse:
+    repo = Repository(db)
+    row = repo.add_additional_project(profile_id=profile_id, **payload.model_dump())
+    return AdditionalProjectResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/educations", response_model=list[EducationResponse])
+def list_educations(profile_id: int, db: Session = Depends(get_db)) -> list[EducationResponse]:
+    repo = Repository(db)
+    rows = repo.list_education(profile_id)
+    return [
+        EducationResponse(
+            id=row.id,
+            institution=row.institution,
+            degree=row.degree,
+            field=row.field,
+            gpa=row.gpa,
+            thesis_title=row.thesis_title,
+            advisor=row.advisor,
+            lab=row.lab,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/profiles/{profile_id}/educations", response_model=EducationResponse)
+def create_education(
+    profile_id: int,
+    payload: EducationRequest,
+    db: Session = Depends(get_db),
+) -> EducationResponse:
+    repo = Repository(db)
+    row = repo.add_education(profile_id=profile_id, **payload.model_dump())
+    return EducationResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/experiences", response_model=list[ExperienceResponse])
+def list_experiences(profile_id: int, db: Session = Depends(get_db)) -> list[ExperienceResponse]:
+    repo = Repository(db)
+    rows = repo.list_experiences(profile_id)
+    return [
+        ExperienceResponse(
+            id=row.id,
+            company=row.company,
+            title=row.title,
+            description=row.description,
+            advisor=row.advisor,
+            impact_summary=row.impact_summary,
+            skills_json=row.skills_json,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/profiles/{profile_id}/experiences", response_model=ExperienceResponse)
+def create_experience(
+    profile_id: int,
+    payload: ExperienceRequest,
+    db: Session = Depends(get_db),
+) -> ExperienceResponse:
+    repo = Repository(db)
+    row = repo.add_experience(profile_id=profile_id, **payload.model_dump())
+    return ExperienceResponse(id=row.id, **payload.model_dump())
+
+
+@router.get("/profiles/{profile_id}/skills", response_model=list[SkillResponse])
+def list_skills(profile_id: int, db: Session = Depends(get_db)) -> list[SkillResponse]:
+    repo = Repository(db)
+    rows = repo.list_skills(profile_id)
+    return [
+        SkillResponse(
+            id=row.id,
+            name=row.name,
+            category=row.category,
+            years=row.years,
+            proficiency=row.proficiency,
+            last_used_year=row.last_used_year,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/profiles/{profile_id}/skills", response_model=SkillResponse)
+def create_skill(
+    profile_id: int,
+    payload: SkillRequest,
+    db: Session = Depends(get_db),
+) -> SkillResponse:
+    repo = Repository(db)
+    row = repo.add_skill(profile_id=profile_id, **payload.model_dump())
+    return SkillResponse(id=row.id, **payload.model_dump())
 
 
 @router.post("/jobs/intake", response_model=JobIntakeResponse)
